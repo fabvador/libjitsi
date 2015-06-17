@@ -84,6 +84,9 @@ public class TransformEngineChain
             if (oldLength != 0)
                 System.arraycopy(oldValue, 0, newValue, 0, oldLength);
             newValue[oldLength] = engine;
+            
+            // github Issue#50: bug in org.jitsi.impl.neomedia.transform.TransformEngineChain#addEngine
+            this.engineChain = newValue;
         }
 
         return true;

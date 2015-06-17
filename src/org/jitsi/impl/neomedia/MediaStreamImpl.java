@@ -288,7 +288,12 @@ public class MediaStreamImpl
      */
     private TransformEngine transformEngineChain;
 
-    /**
+    //github Issue#51: org.jitsi.impl.neomedia.MediaStreamImpl field transformEngineChain should be accessible
+    public TransformEngine getTransformEngineChain() {
+		return transformEngineChain;
+	}
+
+	/**
      * Initializes a new <tt>MediaStreamImpl</tt> instance which will use the
      * specified <tt>MediaDevice</tt> for both capture and playback of media.
      * The new instance will not have an associated <tt>StreamConnector</tt> and
