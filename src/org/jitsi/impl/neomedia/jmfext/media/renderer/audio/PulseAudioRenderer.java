@@ -411,6 +411,7 @@ public class PulseAudioRenderer
 
                 String dev = getLocatorDev();
 
+                System.err.println("----------------------------------" + dev);
                 PA.stream_connect_playback(
                         stream,
                         dev,
