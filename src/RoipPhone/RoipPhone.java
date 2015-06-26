@@ -11,6 +11,7 @@ import java.util.Scanner;
 import java.util.Set;
 import java.util.Vector;
 
+import javax.media.CaptureDeviceInfo;
 import javax.media.PlugInManager;
 import javax.media.control.PacketSizeControl;
 
@@ -26,11 +27,18 @@ import org.jitsi.service.neomedia.MediaService;
 import org.jitsi.service.neomedia.MediaStream;
 import org.jitsi.service.neomedia.MediaStreamTarget;
 import org.jitsi.service.neomedia.MediaType;
-import org.jitsi.service.neomedia.MediaUseCase;
 import org.jitsi.service.neomedia.codec.Constants;
+import org.jitsi.service.neomedia.device.MediaDevice;
 import org.jitsi.service.neomedia.format.MediaFormat;
 
+import com.bethecoder.ascii_table.ASCIITable;
+import com.bethecoder.ascii_table.ASCIITableHeader;
+import com.bethecoder.ascii_table.impl.CollectionASCIITableAware;
+import com.bethecoder.ascii_table.spec.IASCIITable;
+import com.bethecoder.ascii_table.spec.IASCIITableAware;
+
 import RoipPhone.impl.neomedia.codec.audio.ulaw.Packetizer;
+import RoipPhone.impl.neomedia.device.RoipPhoneMediaDevice;
 import RoipPhone.impl.neomedia.transform.ABCD.AbcdTransformEngine;
 import RoipPhone.service.neomedia.ABCDRtpSignal;
 import RoipPhone.service.neomedia.event.ABCDListener;
@@ -49,14 +57,9 @@ public class RoipPhone
 {
 	private MediaService mediaService				= null;
 	private MediaFormat format						= null;
-	private MediaStream mediaStream					= null;
 
-	private char keyPressed							= 0;
-	private boolean transmit						= false;
-	private boolean stopApp							= false;
-
-	private AbcdTransformEngine abcdTransformEngine	= null;
-
+	private Vector<AudioLine> audioLineList			= new Vector<AudioLine>();
+	private Controller controller					= null;
 	
 	
 	
@@ -105,161 +108,438 @@ public class RoipPhone
 	
 	private void configure() throws Exception
 	{	
-		mediaStream = prepareRoipStream(6666, "10.0.5.20", 5004);
-	}
-	private MediaStream prepareRoipStream(int localPort, String remoteIP, int remotePort) throws Exception
-	{
-		//=====================
-		// set the audioSystem
-		//AudioSystem[] list = ((MediaServiceImpl) LibJitsi.getMediaService()).getDeviceConfiguration().getAvailableAudioSystems();
-		//((MediaServiceImpl) LibJitsi.getMediaService()).getDeviceConfiguration().setAudioSystem(list[0], true);
-		
-		//=====================
-		// creates the stream
-		MediaStream mediaStream = mediaService.createMediaStream(MediaType.AUDIO);
-
-		//=====================
-		// connector
-		DefaultStreamConnector connector = new DefaultStreamConnector(
-				new DatagramSocket(localPort),
-				new DatagramSocket(localPort + 1));
-		mediaStream.setConnector(connector);
-		
-		//=====================
-		// set the device
-		mediaStream.setDevice(mediaService.getDefaultDevice(MediaType.AUDIO, MediaUseCase.CALL));
-		
-		//=====================
-		// direction
-		mediaStream.setDirection(MediaDirection.SENDRECV);
-		
-		//=====================
-		// format
-		mediaStream.setFormat(format);
-
-		//=====================
-		// custom RTP payload
-		mediaStream.addDynamicRTPPayloadType((byte) 97, mediaService.getFormatFactory().createMediaFormat(Constants.TELEPHONE_EVENT, 8000));
-		if (mediaStream instanceof AudioMediaStreamImpl)
-		{
-			abcdTransformEngine = new AbcdTransformEngine((AudioMediaStreamImpl) mediaStream);
-			abcdTransformEngine.addAbcdListener(new ABCDListener()
-			{
-				@Override
-				public void abcdSignalReception(ABCDSignalEvent event) 
-				{
-					System.out.print("abcdSignalReception");
-					sendPttCommand(transmit);
-				}
-			});
-			mediaStream.setExternalTransformer(abcdTransformEngine);
-		}
-		
-		//=====================
-		// target
-		MediaStreamTarget target = new MediaStreamTarget(
-				new InetSocketAddress(remoteIP, remotePort),
-				new InetSocketAddress(remoteIP, remotePort + 1)); 
-		mediaStream.setTarget(target);		
-
-		
-		return mediaStream;
-	}
-	private void start()
-	{
-		if (mediaStream != null)
-		{
-			mediaStream.start();
-
-			//=====================
-			// set the packet size
-			Set<PacketSizeControl> packetControlList = ((AudioMediaStreamImpl) mediaStream).getDeviceSession().getEncoderControls(PacketSizeControl.class);
-			Iterator<PacketSizeControl> iterator = packetControlList.iterator();
-			while (iterator.hasNext())
-			{
-				PacketSizeControl control = iterator.next();
-				control.setPacketSize(320);
-			}
-
-
-			new Thread(new Runnable()
-			{
-				@Override
-				public void run() 
-				{
-					Scanner scanner = new Scanner(System.in);
-					while ((keyPressed != 'x') && (keyPressed != 'q'))
-					{
-						String line = scanner.nextLine().trim(); 
-						keyPressed = line.charAt(0);
-						
-						if (keyPressed == 't')
-						{
-							sendPttCommand(true);
-							keyPressed = 0;
-						}
-						else if (keyPressed == 's')
-						{
-							sendPttCommand(false);
-							keyPressed = 0;
-						}
-						else if (keyPressed == 'p')
-						{
-							boolean processed = false;
-							if (line.length() > 1)
-							{
-								try
-								{
-									int i = Integer.parseInt(line.substring(1));
-									AudioSystem audioSystem = ((MediaServiceImpl) LibJitsi.getMediaService()).getDeviceConfiguration().getAudioSystem();
-									CaptureDeviceInfo2 device = audioSystem.getDevices(DataFlow.PLAYBACK).get(i);
-									audioSystem.setDevice(DataFlow.PLAYBACK, device, true);
-									processed = true;
-								}
-								catch (Exception e)
-								{
-									e.printStackTrace();
-								}
-							}
-							if (!processed)
-							{
-								AudioSystem audioSystem = ((MediaServiceImpl) LibJitsi.getMediaService()).getDeviceConfiguration().getAudioSystem();
-								CaptureDeviceInfo2 selected = audioSystem.getSelectedDevice(DataFlow.PLAYBACK);
-								List<CaptureDeviceInfo2> list = audioSystem.getDevices(DataFlow.PLAYBACK);
-								for (int i = 0; i < list.size(); i++)
-								{
-									System.err.println(i + (selected == list.get(i) ? "*\t" : "\t") + list.get(i).getName() + "," + list.get(i).getLocator());
-								}		
-							}
-						}
-					}
-					stopApp = true;
-				}	
-			}).start();
-		}
+		audioLineList.add(new AudioLine(6666, "10.0.5.20", 5004));
+		//audioLineList.add(new AudioLine(6668, "10.0.5.20", 5006));
 	}
 	private void stop()
 	{
-		if (mediaStream != null)
+		for (AudioLine line : audioLineList)
 		{
-			mediaStream.stop();
-			mediaStream.close();
-		}
+			line.stop();
+		}		
 	}
-	private void sendPttCommand(boolean activate)
+	private void start()
 	{
-		transmit = activate;
-		mediaStream.setMute(!transmit);
-		if (abcdTransformEngine != null)
+		for (AudioLine line : audioLineList)
 		{
-			abcdTransformEngine.sendSignal(ABCDRtpSignal.mapSignal(transmit ? ABCDSignal.ABCD_8 : ABCDSignal.ABCD_0));
+			line.start();
 		}
+
+
+		controller = new Controller();
+		controller.start();
 	}
 
 
+	
+	
+	
+	private class AudioLine
+	{
+		private MediaStream mediaStream					= null;
+		private boolean transmit						= false;
+		private AbcdTransformEngine abcdTransformEngine	= null;
+
+		//=====================
+		// set the audio payload size
+		//--------
+		// 160 - 20ms of audio @8000 Samples/seconds & 1 byte/sample (like PCMU/PCMA)
+		// 320 - 40ms of audio @8000 Samples/seconds & 1 byte/sample (like PCMU/PCMA)
+		private int currentRtpAudioPayloadSize			= 320;
+	
+		private String remoteAddress					= null;
+		
+		
+		private AudioLine(int localPort, String remoteIP, int remotePort) throws Exception
+		{
+			remoteAddress = remoteIP + ":" + remotePort;
+
+			//=====================
+			// set the audioSystem
+			//AudioSystem[] list = ((MediaServiceImpl) LibJitsi.getMediaService()).getDeviceConfiguration().getAvailableAudioSystems();
+			//((MediaServiceImpl) LibJitsi.getMediaService()).getDeviceConfiguration().setAudioSystem(list[0], true);
+			
+			//=====================
+			// creates the stream
+			mediaStream = mediaService.createMediaStream(MediaType.AUDIO);
+
+			//=====================
+			// connector
+			mediaStream.setConnector(new DefaultStreamConnector(new DatagramSocket(localPort), new DatagramSocket(localPort + 1)));
+			
+			//=====================
+			// direction
+			mediaStream.setDirection(MediaDirection.SENDRECV);
+
+			//=====================
+			// set the device
+			//------
+			// This works for the audio input (microphone)
+			AudioSystem audioSystem = ((MediaServiceImpl) LibJitsi.getMediaService()).getDeviceConfiguration().getAudioSystem();
+			mediaStream.setDevice(new RoipPhoneMediaDevice(
+					audioSystem.getSelectedDevice(DataFlow.CAPTURE),
+					audioSystem.getSelectedDevice(DataFlow.PLAYBACK)
+					));
+			
+			//=====================
+			// format
+			mediaStream.setFormat(format);
+
+			//=====================
+			// custom RTP payload
+			mediaStream.addDynamicRTPPayloadType((byte) 97, mediaService.getFormatFactory().createMediaFormat(Constants.TELEPHONE_EVENT, 8000));
+			if (mediaStream instanceof AudioMediaStreamImpl)
+			{
+				abcdTransformEngine = new AbcdTransformEngine((AudioMediaStreamImpl) mediaStream);
+				abcdTransformEngine.addAbcdListener(new ABCDListener()
+				{
+					@Override
+					public void abcdSignalReception(ABCDSignalEvent event) 
+					{
+						System.out.println("\nabcdSignalReception from " + remoteAddress);
+						sendPttCommand(transmit);
+					}
+				});
+				mediaStream.setExternalTransformer(abcdTransformEngine);
+			}
+			
+			//=====================
+			// target
+			mediaStream.setTarget(new MediaStreamTarget(new InetSocketAddress(remoteIP, remotePort), new InetSocketAddress(remoteIP, remotePort + 1)));		
+		}
+		
+		
+		public void start() 
+		{
+			if (mediaStream != null)
+			{
+				mediaStream.start();
+				
+				setRtpAudioPayloadSize(currentRtpAudioPayloadSize);
+			}
+		}
 
 
+		private void stop()
+		{
+			if (mediaStream != null)
+			{
+				mediaStream.stop();
+				mediaStream.close();
+			}
+		}
+		private void sendPttCommand(boolean activate)
+		{
+			transmit = activate;
+			mediaStream.setMute(!transmit);
+			if (abcdTransformEngine != null)
+			{
+				abcdTransformEngine.sendSignal(ABCDRtpSignal.mapSignal(transmit ? ABCDSignal.ABCD_8 : ABCDSignal.ABCD_0));
+			}
+		}
+		private void setRtpAudioPayloadSize(int currentRtpAudioPayloadSize)
+		{
+			this.currentRtpAudioPayloadSize = currentRtpAudioPayloadSize;
+			Set<PacketSizeControl> packetControlList = ((AudioMediaStreamImpl) mediaStream).getDeviceSession().getEncoderControls(PacketSizeControl.class);
+			if (packetControlList != null)
+			{
+				Iterator<PacketSizeControl> iterator = packetControlList.iterator();
+				while (iterator.hasNext())
+				{
+					PacketSizeControl control = iterator.next();
+					control.setPacketSize(currentRtpAudioPayloadSize);
+				}
+			}		
+		}
+		public void changeDevice(DataFlow flow, CaptureDeviceInfo captureDeviceInfo) 
+		{
+			MediaDevice device = mediaStream.getDevice();
+			if (device instanceof RoipPhoneMediaDevice)
+			{
+				switch (flow)
+				{
+				case CAPTURE:
+					mediaStream.setDevice(new RoipPhoneMediaDevice(captureDeviceInfo, ((RoipPhoneMediaDevice) device).playbackMediaDeviceInfo));
+					setRtpAudioPayloadSize(currentRtpAudioPayloadSize);	
+					break;
+				case PLAYBACK:
+					mediaStream.setDevice(new RoipPhoneMediaDevice(((RoipPhoneMediaDevice) device).getCaptureDeviceInfo(), captureDeviceInfo));
+					setRtpAudioPayloadSize(currentRtpAudioPayloadSize);	
+					break;
+				}
+			}
+		}
+	}
+	
+	
+	
+	
+	
+	private class Controller implements Runnable
+	{
+		private char keyPressed		= 0;
+		private boolean stopApp		= false;
 
+		private int selectedIndex	= 0;
+		
+		@Override
+		public void run() 
+		{
+			Scanner scanner = new Scanner(System.in);
+			while ((keyPressed != 'x') && (keyPressed != 'q'))
+			{
+				String line = scanner.nextLine().trim(); 
+				keyPressed = line.length() > 0 ? line.charAt(0) : 0;
+				
+				if (keyPressed == 't')
+				{
+					audioLineList.get(selectedIndex).sendPttCommand(true);
+					keyPressed = 0;
+				}
+				else if (keyPressed == 's')
+				{
+					audioLineList.get(selectedIndex).sendPttCommand(false);
+					keyPressed = 0;
+				}
+				else if (keyPressed == 'i')
+				{
+					if (line.length() > 1)
+					{
+						try
+						{
+							int i = Integer.parseInt(line.substring(1));
+							if ((i >= 0) && (i < audioLineList.size()))
+							{
+								selectedIndex = i;
+							}
+						}
+						catch (Exception e)
+						{
+							e.printStackTrace();
+						}
+					}
+					System.out.println("\nCurrent Index:" + selectedIndex);
+					keyPressed = 0;
+				}
+				else if (keyPressed == 'r')
+				{
+					if (line.length() > 1)
+					{
+						try
+						{
+							int i = Integer.parseInt(line.substring(1));
+							audioLineList.get(selectedIndex).setRtpAudioPayloadSize(160 * i);
+						}
+						catch (Exception e)
+						{
+							e.printStackTrace();
+						}
+					}
+					else
+					{
+						System.out.println("Current RTP Audio Payload:" + audioLineList.get(selectedIndex).currentRtpAudioPayloadSize);
+					}
+					keyPressed = 0;
+				}
+				else if (keyPressed == 'p')
+				{
+					boolean processed = false;
+					if (line.length() > 1)
+					{
+						try
+						{
+							int i = Integer.parseInt(line.substring(1));
+							AudioSystem audioSystem = ((MediaServiceImpl) LibJitsi.getMediaService()).getDeviceConfiguration().getAudioSystem();
+							audioLineList.get(selectedIndex).changeDevice(DataFlow.PLAYBACK, audioSystem.getDevices(DataFlow.PLAYBACK).get(i));
+							processed = true;
+						}
+						catch (Exception e)
+						{
+							e.printStackTrace();
+						}
+					}
+					if (!processed)
+					{
+						CaptureDeviceInfo selected = null;
+						MediaDevice device = audioLineList.get(selectedIndex).mediaStream.getDevice();
+						if (device instanceof RoipPhoneMediaDevice)
+						{
+							selected = ((RoipPhoneMediaDevice) device).playbackMediaDeviceInfo;
+						}
+						//---------
+						// list the devices
+						AudioSystem audioSystem = ((MediaServiceImpl) LibJitsi.getMediaService()).getDeviceConfiguration().getAudioSystem();
+						List<CaptureDeviceInfo2> list = audioSystem.getDevices(DataFlow.PLAYBACK);
+						Vector<DeviceDesc> deviceList = new Vector<DeviceDesc>();
+						if ((list != null) && (!list.isEmpty()))
+						{
+							for (int i = 0; i < list.size(); i++)
+							{
+								CaptureDeviceInfo2 cur = list.get(i);
+								deviceList.add(new DeviceDesc(i, selected == cur ? "*" : "", cur.getName(), cur.getLocator().toString()));
+							}
+						}
+						//---------
+						// create the table
+						String title = "PLAYBACK DEVICE";
+						if (list.isEmpty())
+						{
+							ASCIITableHeader[] header = { new ASCIITableHeader(title, ASCIITable.ALIGN_CENTER) };
+							String[][] data = { { "VOID" } };
+							System.out.println(ASCIITable.getInstance().getTable(header, data));
+						}
+						else
+						{
+							IASCIITableAware asciiTable = new CollectionASCIITableAware<DeviceDesc>(deviceList, "index", "selected", "name", "locator");
+							asciiTable.getHeaders().get(1).setDataAlign(IASCIITable.ALIGN_LEFT);
+							asciiTable.getHeaders().get(2).setDataAlign(IASCIITable.ALIGN_LEFT);
+							asciiTable.getHeaders().get(3).setDataAlign(IASCIITable.ALIGN_LEFT);
+							String res = ASCIITable.getInstance().getTable(asciiTable);
+							int length = res.indexOf("\n");
+							System.out.println(createLine(length) + "|" + getFormattedData(length - 2, title) + "|\n" + res + "\n");
+						}
+					}
+				}
+				else if (keyPressed == 'c')
+				{
+					boolean processed = false;
+					if (line.length() > 1)
+					{
+						try
+						{
+							int i = Integer.parseInt(line.substring(1));							
+							AudioSystem audioSystem = ((MediaServiceImpl) LibJitsi.getMediaService()).getDeviceConfiguration().getAudioSystem();
+							audioLineList.get(selectedIndex).changeDevice(DataFlow.CAPTURE, audioSystem.getDevices(DataFlow.CAPTURE).get(i));									
+							processed = true;
+						}
+						catch (Exception e)
+						{
+							e.printStackTrace();
+						}
+					}
+					if (!processed)
+					{
+						CaptureDeviceInfo selected = null;
+						MediaDevice device = audioLineList.get(selectedIndex).mediaStream.getDevice();
+						if (device instanceof RoipPhoneMediaDevice)
+						{
+							selected = ((RoipPhoneMediaDevice) device).getCaptureDeviceInfo();
+						}
+						//---------
+						// list the devices
+						AudioSystem audioSystem = ((MediaServiceImpl) LibJitsi.getMediaService()).getDeviceConfiguration().getAudioSystem();
+						List<CaptureDeviceInfo2> list = audioSystem.getDevices(DataFlow.CAPTURE);
+						Vector<DeviceDesc> deviceList = new Vector<DeviceDesc>();
+						if ((list != null) && (!list.isEmpty()))
+						{
+							for (int i = 0; i < list.size(); i++)
+							{
+								CaptureDeviceInfo2 cur = list.get(i);
+								deviceList.add(new DeviceDesc(i, selected == cur ? "*" : "", cur.getName(), cur.getLocator().toString()));
+							}
+						}
+						//---------
+						// create the table
+						String title = "CATURE DEVICE";
+						if (list.isEmpty())
+						{
+							ASCIITableHeader[] header = { new ASCIITableHeader(title, ASCIITable.ALIGN_CENTER) };
+							String[][] data = { { "VOID" } };
+							System.out.println(ASCIITable.getInstance().getTable(header, data));
+						}
+						else
+						{
+							IASCIITableAware asciiTable = new CollectionASCIITableAware<DeviceDesc>(deviceList, "index", "selected", "name", "locator");
+							asciiTable.getHeaders().get(1).setDataAlign(IASCIITable.ALIGN_LEFT);
+							asciiTable.getHeaders().get(2).setDataAlign(IASCIITable.ALIGN_LEFT);
+							asciiTable.getHeaders().get(3).setDataAlign(IASCIITable.ALIGN_LEFT);
+							String res = ASCIITable.getInstance().getTable(asciiTable);
+							int length = res.indexOf("\n");
+							System.out.println(createLine(length) + "|" + getFormattedData(length - 2, title) + "|\n" + res + "\n");
+						}
+					}
+				}
+			}
+			stopApp = true;
+		}
+
+		public void start()
+		{
+			new Thread(this).start();
+		}	
+	}
+
+
+	
+	
+	
+	
+	public static class DeviceDesc
+	{
+		private int index;
+		private String selected;
+		private String name;
+		private String locator;
+
+		public DeviceDesc(int index, String selected, String name, String locator) 
+		{
+			this.index = index;
+			this.selected = selected;
+			this.name = name;
+			this.locator = locator;
+		}
+		public int getIndex()
+		{
+			return index;
+		}
+		public String getSelected()
+		{
+			return selected;
+		}
+		public String getName()
+		{
+			return name;
+		}
+		public String getLocator()
+		{
+			return locator;
+		}
+	}
+	private static String createLine(int length)
+	{
+		String data = "+";
+		while (data.length() < length - 1)
+		{
+			data += "-";
+		}
+		return data + "+\n";
+	}
+	private static String getFormattedData(int maxLength, String data)
+	{
+		if (data.length() > maxLength)
+		{
+			return data;
+		}
+
+		boolean toggle = true;
+		while (data.length() < maxLength)
+		{
+			if (toggle)
+			{
+				data = " " + data;
+				toggle = false;
+			}
+			else
+			{
+				data = data + " ";
+				toggle = true;
+			}
+		}
+
+		return data;
+	}
+
+	
 
 	public static void main(String[] args) throws Exception
 	{
@@ -271,7 +551,7 @@ public class RoipPhone
 
 			phone.configure();
 			phone.start();
-			while (!phone.stopApp)
+			while (!phone.controller.stopApp)
 			{
 				Sleep(1000);
 			}
