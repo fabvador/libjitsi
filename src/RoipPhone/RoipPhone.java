@@ -38,6 +38,7 @@ import com.bethecoder.ascii_table.spec.IASCIITable;
 import com.bethecoder.ascii_table.spec.IASCIITableAware;
 
 import RoipPhone.impl.neomedia.codec.audio.ulaw.Packetizer;
+import RoipPhone.impl.neomedia.codec.audio.ulaw.Packetizer.MuteControl;
 import RoipPhone.impl.neomedia.device.RoipPhoneMediaDevice;
 import RoipPhone.impl.neomedia.transform.ABCD.AbcdTransformEngine;
 import RoipPhone.service.neomedia.ABCDRtpSignal;
@@ -137,7 +138,7 @@ public class RoipPhone
 	private class AudioLine
 	{
 		private MediaStream mediaStream					= null;
-		private boolean transmit						= false;
+		private boolean pttActive						= false;
 		private AbcdTransformEngine abcdTransformEngine	= null;
 
 		//=====================
@@ -197,7 +198,7 @@ public class RoipPhone
 					public void abcdSignalReception(ABCDSignalEvent event) 
 					{
 						System.out.println("\nabcdSignalReception from " + remoteAddress);
-						sendPttCommand(transmit);
+						sendPttCommand(pttActive);
 					}
 				});
 				mediaStream.setExternalTransformer(abcdTransformEngine);
@@ -228,28 +229,48 @@ public class RoipPhone
 				mediaStream.close();
 			}
 		}
-		private void sendPttCommand(boolean activate)
+		private void sendPttCommand(boolean pttActive)
 		{
-			transmit = activate;
-			mediaStream.setMute(!transmit);
+			this.pttActive = pttActive;
+			mediaStream.setMute(!this.pttActive);
+			updateMuteControls();
 			if (abcdTransformEngine != null)
 			{
-				abcdTransformEngine.sendSignal(ABCDRtpSignal.mapSignal(transmit ? ABCDSignal.ABCD_8 : ABCDSignal.ABCD_0));
+				abcdTransformEngine.sendSignal(ABCDRtpSignal.mapSignal(this.pttActive ? ABCDSignal.ABCD_8 : ABCDSignal.ABCD_0));
+			}
+		}
+		private void updateMuteControls()
+		{
+			if (mediaStream instanceof AudioMediaStreamImpl)
+			{
+				Set<MuteControl> muteControlList = ((AudioMediaStreamImpl) mediaStream).getDeviceSession().getEncoderControls(MuteControl.class);
+				if (muteControlList != null)
+				{
+					Iterator<MuteControl> iterator = muteControlList.iterator();
+					while (iterator.hasNext())
+					{
+						MuteControl control = iterator.next();
+						control.setMute(!pttActive);
+					}
+				}
 			}
 		}
 		private void setRtpAudioPayloadSize(int currentRtpAudioPayloadSize)
 		{
 			this.currentRtpAudioPayloadSize = currentRtpAudioPayloadSize;
-			Set<PacketSizeControl> packetControlList = ((AudioMediaStreamImpl) mediaStream).getDeviceSession().getEncoderControls(PacketSizeControl.class);
-			if (packetControlList != null)
+			if (mediaStream instanceof AudioMediaStreamImpl)
 			{
-				Iterator<PacketSizeControl> iterator = packetControlList.iterator();
-				while (iterator.hasNext())
+				Set<PacketSizeControl> packetControlList = ((AudioMediaStreamImpl) mediaStream).getDeviceSession().getEncoderControls(PacketSizeControl.class);
+				if (packetControlList != null)
 				{
-					PacketSizeControl control = iterator.next();
-					control.setPacketSize(currentRtpAudioPayloadSize);
+					Iterator<PacketSizeControl> iterator = packetControlList.iterator();
+					while (iterator.hasNext())
+					{
+						PacketSizeControl control = iterator.next();
+						control.setPacketSize(this.currentRtpAudioPayloadSize);
+					}
 				}
-			}		
+			}
 		}
 		public void changeDevice(DataFlow flow, CaptureDeviceInfo captureDeviceInfo) 
 		{
